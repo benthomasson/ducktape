@@ -12,7 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+
 from ducktape.command_line.parse_args import parse_args
+
+from ..loader.check_loader import logging_config_directory
 
 from cStringIO import StringIO
 from exceptions import SystemExit
@@ -139,3 +142,11 @@ class CheckParseArgs(object):
             assert args_dict["parameters"] == "PARAMETERS-user"
         finally:
             shutil.rmtree(tmpdir)
+
+    def check_logging_config_file_option(self):
+        """Check that the logging config file option works"""
+
+        logging_config_file = os.path.join(logging_config_directory(), 'test_a.yaml')
+
+        args_dict = parse_args(["--logging-config", logging_config_file])
+        assert args_dict["logging_config"] == logging_config_file

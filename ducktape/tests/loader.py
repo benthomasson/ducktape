@@ -44,7 +44,7 @@ class TestLoader(object):
     """Class used to discover and load tests."""
 
     def __init__(self, session_context, logger, repeat=1, injected_args=None, cluster=None, subset=0, subsets=1,
-                 historical_report=None):
+                 historical_report=None, logging_config=None):
         self.session_context = session_context
         self.cluster = cluster
         assert logger is not None
@@ -67,6 +67,9 @@ class TestLoader(object):
         # in any discovered test, whether or not it is parametrized
         self.injected_args = injected_args
 
+
+        self.logging_config = logging_config if logging_config is not None else dict()
+
     def load(self, test_discovery_symbols):
         """Recurse through packages in file hierarchy starting at base_dir, and return a list of test_context objects
         for all discovered tests.
@@ -84,6 +87,7 @@ class TestLoader(object):
         all_test_context_list = []
         for symbol in test_discovery_symbols:
             directory, module_name, cls_name, method_name = self._parse_discovery_symbol(symbol)
+            self.logger.debug("_parse_discovery_symbol %s %s %s %s", directory, module_name, cls_name, method_name)
             directory = os.path.abspath(directory)
 
             test_context_list_for_symbol = self.discover(directory, module_name, cls_name, method_name)
@@ -92,7 +96,11 @@ class TestLoader(object):
             if len(test_context_list_for_symbol) == 0:
                 raise LoaderException("Didn't find any tests for symbol %s." % symbol)
 
+        for test_context in all_test_context_list:
+            self._configure_logging(test_context)
+
         self.logger.debug("Discovered these tests: " + str(all_test_context_list))
+        self.logger.debug("Discovered these tests: " + str(map(type, all_test_context_list)))
 
         # Sort to make sure we get a consistent order for when we create subsets
         all_test_context_list = sorted(all_test_context_list, key=attrgetter("test_id"))
@@ -277,6 +285,67 @@ class TestLoader(object):
 
         return module_and_file_list
 
+    def _configure_logging(self, test_context):
+        """
+        Configures logging of a service during a test if the service matches the following criteria:
+
+        * The test module name matches the module provided
+        * The test class name matches the class name provided if provided
+        * The test function name matches the function name provided if provided
+        * The service name matches the module name and the class name of the service provide
+            in the format: module_name.class_name
+
+        This function takes a data-structure in logging_config with the following layout:
+
+        {'tests': [{'test': 'test_module_name.TestClassName.test_method_name',
+                    'services': [{
+                                 'name': 'service_module_name.ServiceClassName',
+                                 'logs':
+                                   [{'collect': 'on fail', 'name': 'debug_log'},
+                                    {'collect': True, 'name': 'info_log'},
+                                    {'collect': True, 'name': 'error_log'},
+                                   ]
+                                }]
+                    }]}
+
+        This function will match the test name and the service name with the
+        module, cls, and function in test_context and assign the configured value
+        to log_collect[(log_name, service_name)].
+        """
+        module = test_context.module or test_context.cls.__module__
+        cls = test_context.cls
+        function = test_context.function
+        for test_config in self.logging_config.get('tests', []):
+            test_full_name = test_config.get('test', '')
+            self.logger.debug("test_full_name %s module %s", test_full_name, module)
+            if test_full_name.startswith(module):
+                self.logger.debug("_configure_logging module matches %s", module)
+                rest = test_full_name[len(module):]
+                rest = rest[1:] if rest.startswith(".") else rest
+                self.logger.debug("rest %s cls", rest)
+                if not rest or rest.startswith(cls.__name__):
+                    self.logger.debug("_configure_logging class matches %s", cls)
+                    rest = rest[len(cls.__name__):]
+                    rest = rest[1:] if rest.startswith(".") else rest
+                    self.logger.debug("rest %s cls", rest)
+                    if not rest or rest.startswith(function.__name__):
+                        self.logger.debug("_configure_logging function matches %s", function)
+                        for service in test_config.get('services', []):
+                            for log in service.get('logs', []):
+                                if 'name' in log and 'collect' in log:
+                                    key = (log['name'], service['name'])
+                                    self.logger.debug("_configure_logging (%s) = %s",
+                                                      key,
+                                                      log['collect'])
+                                    if key in test_context.log_collect:
+                                        self.logger.warning("Overwriting log config for %s", key)
+                                    test_context.log_collect[key] = log['collect']
+                                else:
+                                    self.logger.warning("log entry should contain 'name' and 'collect' values")
+        self.logger.debug("log_collect %s", test_context.log_collect)
+
+
+
     def _expand_module(self, module_and_file):
         """Return a list of TestContext objects, one object for every 'testable unit' in module"""
 
@@ -285,6 +354,7 @@ class TestLoader(object):
         file_name = module_and_file.file
         module_objects = module.__dict__.values()
         test_classes = [c for c in module_objects if self._is_test_class(c)]
+
 
         for cls in test_classes:
             test_context_list.extend(self._expand_class(

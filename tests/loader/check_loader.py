@@ -21,6 +21,7 @@ import os.path
 import pytest
 import re
 import requests
+import yaml
 
 from mock import Mock
 from requests_testadapter import Resp
@@ -47,6 +48,10 @@ def resources_dir():
 def discover_dir():
     """Return the absolute path to the directory to use with discovery tests."""
     return os.path.join(resources_dir(), "loader_test_directory")
+
+
+def logging_config_directory():
+    return os.path.join(resources_dir(), "logging_config_directory")
 
 
 def num_tests_in_file(fpath):
@@ -278,6 +283,136 @@ class CheckParseSymbol(object):
             assert actually_parsed == expected_parsed, "%s did not parse as expected" % symbol
 
 
+class CheckLoggingConfig(object):
+
+    def setup_method(self, method):
+        self.SESSION_CONTEXT = tests.ducktape_mock.session_context()
+        _requests_session.mount('file://', LocalFileAdapter())
+
+    def check_match_class(self):
+        config = os.path.join(logging_config_directory(), 'test_a.yaml')
+        with open(config) as f:
+            loader = TestLoader(self.SESSION_CONTEXT,
+                               logger=Mock(),
+                               logging_config=yaml.load(f.read()))
+        module_path = os.path.join(discover_dir(), "test_a.py")
+
+        tests = loader.load([module_path])
+        expected_config = {('debug_log', 'ServiceX'): "on fail",
+                           ('info_log', 'ServiceX'): True,
+                           ('error_log', 'ServiceX'): True}
+
+        assert tests[0].log_collect == expected_config, "Did not find expected config for test_a"
+
+    def check_match_module(self):
+        config = os.path.join(logging_config_directory(), 'test_a_module.yaml')
+        with open(config) as f:
+            loader = TestLoader(self.SESSION_CONTEXT,
+                               logger=Mock(),
+                               logging_config=yaml.load(f.read()))
+        module_path = os.path.join(discover_dir(), "test_a.py")
+
+        tests = loader.load([module_path])
+        expected_config = {('debug_log', 'ServiceX'): "on fail",
+                           ('info_log', 'ServiceX'): True,
+                           ('error_log', 'ServiceX'): True}
+
+        assert tests[0].log_collect == expected_config, "Did not find expected config for test_a"
+
+    def check_match_function(self):
+        config = os.path.join(logging_config_directory(), 'test_a_function.yaml')
+        with open(config) as f:
+            loader = TestLoader(self.SESSION_CONTEXT,
+                               logger=Mock(),
+                               logging_config=yaml.load(f.read()))
+        module_path = os.path.join(discover_dir(), "test_a.py")
+
+        tests = loader.load([module_path])
+        expected_config = {('debug_log', 'ServiceX'): "on fail",
+                           ('info_log', 'ServiceX'): True,
+                           ('error_log', 'ServiceX'): True}
+
+        assert tests[0].log_collect == expected_config, "Did not find expected config for test_a"
 
 
+    def check_multiple_tests(self):
+        config = os.path.join(logging_config_directory(), 'test_a.yaml')
+        with open(config) as f:
+            loader = TestLoader(self.SESSION_CONTEXT,
+                               logger=Mock(),
+                               logging_config=yaml.load(f.read()))
+        file_a = os.path.join(discover_dir(), "test_a.py")
+        file_b = os.path.join(discover_dir(), "test_b.py")
 
+        tests = loader.load([file_a, file_b])
+
+        expected_config = {('debug_log', 'ServiceX'): "on fail",
+                           ('info_log', 'ServiceX'): True,
+                           ('error_log', 'ServiceX'): True}
+        assert tests[0].log_collect == expected_config, "Did not find expected config for test_a"
+
+        expected_config = {}
+        assert tests[1].log_collect == expected_config, "Did not find expected config for test_b"
+
+    def check_multiple_tests_two_configured(self):
+        config = os.path.join(logging_config_directory(), 'multiple.yaml')
+        with open(config) as f:
+            loader = TestLoader(self.SESSION_CONTEXT,
+                               logger=Mock(),
+                               logging_config=yaml.load(f.read()))
+        file_a = os.path.join(discover_dir(), "test_a.py")
+        file_b = os.path.join(discover_dir(), "test_b.py")
+
+        tests = loader.load([file_a, file_b])
+
+        expected_config = {('debug_log', 'ServiceX'): "on fail",
+                           ('info_log', 'ServiceX'): True,
+                           ('error_log', 'ServiceX'): True}
+        assert tests[0].log_collect == expected_config, "Did not find expected config for test_a"
+
+        expected_config = {('debug_log', 'ServiceY'): "on fail",
+                           ('info_log', 'ServiceY'): True,
+                           ('error_log', 'ServiceY'): True}
+        assert tests[1].log_collect == expected_config, "Did not find expected config for test_b"
+
+    def check_multiple_tests_decorated(self):
+        config = os.path.join(logging_config_directory(), 'module.yaml')
+        with open(config) as f:
+            loader = TestLoader(self.SESSION_CONTEXT,
+                               logger=Mock(),
+                               logging_config=yaml.load(f.read()))
+
+        file = os.path.join(discover_dir(), "test_decorated.py")
+        tests = loader.load([file])
+        expected_config = {('debug_log', 'ServiceX'): "on fail",
+                           ('info_log', 'ServiceX'): True,
+                           ('error_log', 'ServiceX'): True}
+
+        for t in tests:
+            assert t.log_collect == expected_config, "Did not find expected config"
+
+    def check_test_loader_with_injected_args(self):
+        """When the --parameters command-line option is used, the loader behaves a little bit differently:
+
+        each test method annotated with @parametrize or @matrix should only expand to a single discovered test,
+        and the injected args should be those passed in from command-line.
+        """
+        config = os.path.join(logging_config_directory(), 'module.yaml')
+        parameters = {"x": 1, "y": -1}
+        with open(config) as f:
+            loader = TestLoader(self.SESSION_CONTEXT,
+                               logger=Mock(),
+                               injected_args=parameters,
+                               logging_config=yaml.load(f.read()))
+
+        file = os.path.join(discover_dir(), "test_decorated.py")
+        tests = loader.load([file])
+        assert len(tests) == 4
+
+        expected_config = {('debug_log', 'ServiceX'): "on fail",
+                           ('info_log', 'ServiceX'): True,
+                           ('error_log', 'ServiceX'): True}
+
+        for t in tests:
+            assert t.injected_args == parameters
+            assert t.log_collect == expected_config, "Did not find expected config"

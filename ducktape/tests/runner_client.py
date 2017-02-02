@@ -68,13 +68,14 @@ class RunnerClient(object):
         """
         os.kill(os.getpid(), signal.SIGINT)
 
-    def _collect_test_context(self, directory, file_name, cls_name, method_name, injected_args):
+    def _collect_test_context(self, directory, file_name, cls_name, method_name, injected_args, log_collect):
         loader = TestLoader(self.session_context, self.logger, injected_args=injected_args, cluster=self.cluster)
         loaded_context_list = loader.discover(directory, file_name, cls_name, method_name)
 
         assert len(loaded_context_list) == 1
         test_context = loaded_context_list[0]
         test_context.cluster = self.cluster
+        test_context.log_collect = log_collect
         return test_context
 
     def run(self):
@@ -122,14 +123,14 @@ class RunnerClient(object):
 
             data = self.run_test()
 
-            test_status = PASS
+            self.test_context.test_status = test_status = PASS
             self.log(logging.INFO, "PASS")
 
         except BaseException as e:
             err_trace = str(e.message) + "\n" + traceback.format_exc(limit=16)
             self.log(logging.INFO, "FAIL: " + err_trace)
 
-            test_status = FAIL
+            self.test_context.test_status = test_status = FAIL
             summary += err_trace
 
         finally:

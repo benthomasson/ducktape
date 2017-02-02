@@ -1,0 +1,22 @@
+---
+tests:
+  - test: tests.loader.resources.loader_test_directory.test_a
+    services:
+      - name: ServiceX
+        logs:
+          - name: debug_log
+            collect: on fail
+          - name: info_log
+            collect: true
+          - name: error_log
+            collect: true
+  - test: tests.loader.resources.loader_test_directory.test_b
+    services:
+      - name: ServiceY
+        logs:
+          - name: debug_log
+            collect: on fail
+          - name: info_log
+            collect: true
+          - name: error_log
+            collect: true

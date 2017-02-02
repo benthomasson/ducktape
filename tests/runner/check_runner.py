@@ -14,6 +14,7 @@
 
 from ducktape.tests.test import TestContext
 from ducktape.tests.runner import TestRunner
+from ducktape.tests.loader import TestLoader
 from ducktape.mark.mark_expander import MarkedFunctionExpander
 from ducktape.cluster.localhost import LocalhostCluster
 from tests.ducktape_mock import FakeCluster
@@ -22,14 +23,17 @@ import tests.ducktape_mock
 from .resources.test_thingy import TestThingy
 from .resources.test_failing_tests import FailingTest
 
-from mock import Mock
+from mock import Mock, patch
 import os
+import yaml
 
 TEST_THINGY_FILE = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "resources/test_thingy.py"))
 FAILING_TEST_FILE = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "resources/test_failing_tests.py"))
 
+TEST_LOGGING_CONFIG = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "resources/test_thingy.yaml"))
 
 class CheckRunner(object):
     def check_insufficient_cluster_resources(self):
@@ -92,3 +96,36 @@ class CheckRunner(object):
         assert len(ctx_list) > 1
         assert len(results) == 1
 
+
+    @patch("ducktape.tests.runner.TestRunner._run_single_test")
+    def check_log_collect_configuration(self, mock):
+        """Check expected behavior when running a single test."""
+        mock_cluster = LocalhostCluster(num_nodes=1000)
+        session_context = tests.ducktape_mock.session_context()
+
+        with open(TEST_LOGGING_CONFIG) as f:
+            loader = TestLoader(session_context, Mock(), logging_config=yaml.load(f.read()))
+
+        test_methods = [TestThingy.test_pi, TestThingy.test_ignore1, TestThingy.test_ignore2]
+        ctx_list = []
+        for f in test_methods:
+            ctx_list.extend(
+                MarkedFunctionExpander(
+                    session_context=session_context,
+                    cls=TestThingy, function=f, file=TEST_THINGY_FILE, cluster=mock_cluster).expand())
+
+        for ctx in ctx_list:
+            loader._configure_logging(ctx)
+
+        runner = TestRunner(mock_cluster, session_context, Mock(), ctx_list)
+
+        results = runner.run_all_tests()
+
+        mock.assert_called()
+        test_context = mock.call_args[0][0]
+
+        expected_config = {('debug_log', 'ServiceX'): "on fail",
+                           ('info_log', 'ServiceX'): True,
+                           ('error_log', 'ServiceX'): True}
+
+        assert test_context.log_collect == expected_config, "Did not find expected config"

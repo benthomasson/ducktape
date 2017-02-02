@@ -26,9 +26,12 @@ from ducktape.command_line.defaults import ConsoleDefaults
 from ducktape.services.service_registry import ServiceRegistry
 from ducktape.template import TemplateRenderer
 from ducktape.mark.resource import CLUSTER_SIZE_KEYWORD
+from ducktape.tests.status import FAIL
+from ducktape.tests.condition import ON_FAIL
 
 
 class Test(TemplateRenderer):
+
     """Base class for tests.
     """
     def __init__(self, test_context, *args, **kwargs):
@@ -109,7 +112,7 @@ class Test(TemplateRenderer):
         for service in self.test_context.services:
             if not hasattr(service, 'logs') or len(service.logs) == 0:
                 self.test_context.logger.debug("Won't collect service logs from %s - no logs to collect." %
-                    service.service_id)
+                                               service.service_id)
                 continue
 
             log_dirs = service.logs
@@ -145,6 +148,14 @@ class Test(TemplateRenderer):
                              'service': service,
                              'message': e.message})
 
+    def mark_for_collect_on_failure(self, service, log_name=None):
+        if log_name is None:
+            # Mark every log for collection
+            for log_name in service.logs:
+                self.test_context.log_collect[(log_name, service)] = ON_FAIL
+        else:
+            self.test_context.log_collect[(log_name, service)] = ON_FAIL
+
     def mark_for_collect(self, service, log_name=None):
         if log_name is None:
             # Mark every log for collection
@@ -158,9 +169,14 @@ class Test(TemplateRenderer):
 
     def should_collect_log(self, log_name, service):
         key = (log_name, service)
+        service_name = ".".join([service.__class__.__module__,
+                                 service.__class__.__name__])
         default = service.logs[log_name]["collect_default"]
         val = self.test_context.log_collect.get(key, default)
-        return val
+        val = self.test_context.log_collect.get((log_name, service_name), val)
+        if val == ON_FAIL and self.test_context.test_status == FAIL:
+            return True
+        return val is True
 
 
 def _compress_cmd(log_path):
@@ -276,6 +292,7 @@ class TestContext(object):
 
         self._logger = None
         self._local_scratch_dir = None
+        self.test_status = None
 
     def __repr__(self):
         return "<module=%s, cls=%s, function=%s, injected_args=%s, file=%s, ignore=%s, cluster_size=%s>" % \
@@ -305,7 +322,8 @@ class TestContext(object):
             "file_name": os.path.basename(self.file),
             "cls_name": self.cls.__name__,
             "method_name": self.function.__name__,
-            "injected_args": self.injected_args
+            "injected_args": self.injected_args,
+            "log_collect": self.log_collect
         }
 
     @staticmethod
