@@ -1,0 +1,12 @@
+---
+tests:
+  - test: tests.runner.resources.test_logging_config.TestLoggingConfig
+    services:
+      - name: ServiceX
+        logs:
+          - name: debug_log
+            collect: on fail
+          - name: info_log
+            collect: true
+          - name: error_log
+            collect: true

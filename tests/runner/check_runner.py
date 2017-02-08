@@ -22,6 +22,7 @@ from tests.ducktape_mock import FakeCluster
 import tests.ducktape_mock
 from .resources.test_thingy import TestThingy
 from .resources.test_failing_tests import FailingTest
+from .resources.test_logging_config import TestLoggingConfig
 
 from mock import Mock, patch
 import os
@@ -32,8 +33,14 @@ TEST_THINGY_FILE = os.path.abspath(
 FAILING_TEST_FILE = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "resources/test_failing_tests.py"))
 
-TEST_LOGGING_CONFIG = os.path.abspath(
+TEST_THINGY_CONFIG = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "resources/test_thingy.yaml"))
+
+TEST_LOGGING = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "resources/test_logging_config.py"))
+
+TEST_LOGGING_CONFIG = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "resources/test_logging_config.yaml"))
 
 class CheckRunner(object):
     def check_insufficient_cluster_resources(self):
@@ -99,11 +106,11 @@ class CheckRunner(object):
 
     @patch("ducktape.tests.runner.TestRunner._run_single_test")
     def check_log_collect_configuration(self, mock):
-        """Check expected behavior when running a single test."""
+        """Check that the log_collect configuration is correctly sent to the TestRunner._run_single_test function"""
         mock_cluster = LocalhostCluster(num_nodes=1000)
         session_context = tests.ducktape_mock.session_context()
 
-        with open(TEST_LOGGING_CONFIG) as f:
+        with open(TEST_THINGY_CONFIG) as f:
             loader = TestLoader(session_context, Mock(), logging_config=yaml.load(f.read()))
 
         test_methods = [TestThingy.test_pi, TestThingy.test_ignore1, TestThingy.test_ignore2]
@@ -129,3 +136,31 @@ class CheckRunner(object):
                            ('error_log', 'ServiceX'): True}
 
         assert test_context.log_collect == expected_config, "Did not find expected config"
+
+    def check_log_collect_configuration2(self):
+        """Check that the log_collect state is passed to the runner_client"""
+        mock_cluster = LocalhostCluster(num_nodes=1000)
+        session_context = tests.ducktape_mock.session_context()
+
+        with open(TEST_LOGGING_CONFIG) as f:
+            loader = TestLoader(session_context, Mock(), logging_config=yaml.load(f.read()))
+
+        test_methods = [TestLoggingConfig.test_logging_config]
+        ctx_list = []
+        for f in test_methods:
+            ctx_list.extend(
+                MarkedFunctionExpander(
+                    session_context=session_context,
+                    cls=TestLoggingConfig, function=f, file=TEST_LOGGING, cluster=mock_cluster).expand())
+
+        for ctx in ctx_list:
+            loader._configure_logging(ctx)
+
+        runner = TestRunner(mock_cluster, session_context, Mock(), ctx_list)
+
+        results = runner.run_all_tests()
+        assert len(results) == 1
+        assert results.num_failed == 0
+        assert results.num_passed == 1
+        assert results.num_ignored == 0
+
